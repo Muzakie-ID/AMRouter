@@ -24,7 +24,7 @@ export async function POST_handler(req: any, res: any, { params }) {
 
     let models = getProviderModels(alias);
 
-    const baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`;
+    const baseUrl = `http://127.0.0.1:${process.env.PORT || 3001}`;
 
     // Compatible providers: fetch live model list
     if (isCompatible && models.length === 0) {
