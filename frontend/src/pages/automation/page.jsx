@@ -886,36 +886,43 @@ function CodeBuddyTab() {
                     <th className="px-2 py-1">Email</th>
                     <th className="px-2 py-1 w-16">Status</th>
                     <th className="px-2 py-1">Step</th>
+                    <th className="px-2 py-1 w-14 text-right">Time</th>
                     <th className="px-2 py-1 w-12 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {jobLogs.length === 0 ? (
-                    <tr><td colSpan={5} className="px-2 py-2 text-center text-text-muted">Waiting for log entries...</td></tr>
+                    <tr><td colSpan={6} className="px-2 py-2 text-center text-text-muted">Waiting for log entries...</td></tr>
                   ) : (
-                    currentPageRows.map((log, i) => (
-                      <tr key={i} className={`border-t border-border/20 ${
-                        log.status === "failed" ? "bg-red-500/5" : log.status === "done" ? "bg-green-500/5" : ""
-                      }`}>
-                        <td className="px-2 py-1 text-text-muted">{log.idx + 1}</td>
-                        <td className="px-2 py-1 text-text-main truncate max-w-[160px]" title={log.email}>{log.email}</td>
-                        <td className="px-2 py-1 whitespace-nowrap">
-                          {log.status === "running" && <span className="text-blue-400">● run</span>}
-                          {log.status === "done" && <span className="text-green-400">✓ ok</span>}
-                          {log.status === "failed" && <span className="text-red-400">✗ fail</span>}
-                          {log.status === "pending" && <span className="text-text-muted">◌</span>}
-                        </td>
-                        <td className="px-2 py-1 text-text-muted truncate max-w-[280px]" title={log.status === "done" ? (log.balance !== undefined ? `Success · ${log.balance} tokens${log.left_team === true ? ' · Left team ✓' : log.left_team === false ? ' · Left team ✗' : ''}` : "Success") : log.step}>
-                          {log.status === "done" ? (
-                            <span className="text-green-400 font-medium">
-                              {log.balance !== undefined ? `Success · ${log.balance} tokens` : "Success"}
-                              {log.left_team === true && <span className="text-purple-400 ml-1">· Left team ✓</span>}
-                              {log.left_team === false && <span className="text-yellow-400 ml-1">· Left team ✗</span>}
-                            </span>
-                          ) : (
-                            log.step
-                          )}
-                        </td>
+                    currentPageRows.map((log, i) => {
+                      const timeMatch = log.step?.match(/\[([^\]]+s)\]$/);
+                      const displayStep = timeMatch ? log.step.replace(timeMatch[0], "").trim() : log.step;
+                      const timeStr = timeMatch ? timeMatch[1] : "--";
+                      
+                      return (
+                        <tr key={i} className={`border-t border-border/20 ${
+                          log.status === "failed" ? "bg-red-500/5" : log.status === "done" ? "bg-green-500/5" : ""
+                        }`}>
+                          <td className="px-2 py-1 text-text-muted">{log.idx + 1}</td>
+                          <td className="px-2 py-1 text-text-main truncate max-w-[160px]" title={log.email}>{log.email}</td>
+                          <td className="px-2 py-1 whitespace-nowrap">
+                            {log.status === "running" && <span className="text-blue-400">● run</span>}
+                            {log.status === "done" && <span className="text-green-400">✓ ok</span>}
+                            {log.status === "failed" && <span className="text-red-400">✗ fail</span>}
+                            {log.status === "pending" && <span className="text-text-muted">◌</span>}
+                          </td>
+                          <td className="px-2 py-1 text-text-muted truncate max-w-[280px]" title={log.status === "done" ? (log.balance !== undefined ? `Success · ${log.balance} tokens${log.left_team === true ? ' · Left team ✓' : log.left_team === false ? ' · Left team ✗' : ''}` : "Success") : displayStep}>
+                            {log.status === "done" ? (
+                              <span className="text-green-400 font-medium">
+                                {log.balance !== undefined ? `Success · ${log.balance} tokens` : "Success"}
+                                {log.left_team === true && <span className="text-purple-400 ml-1">· Left team ✓</span>}
+                                {log.left_team === false && <span className="text-yellow-400 ml-1">· Left team ✗</span>}
+                              </span>
+                            ) : (
+                              displayStep
+                            )}
+                          </td>
+                          <td className="px-2 py-1 text-right text-[10px] text-text-muted font-mono">{timeStr}</td>
                         <td className="px-2 py-1 text-right whitespace-nowrap">
                           {log.status === "failed" && (
                             <button
@@ -939,7 +946,8 @@ function CodeBuddyTab() {
                           )}
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                   )}
                 </tbody>
               </table>
