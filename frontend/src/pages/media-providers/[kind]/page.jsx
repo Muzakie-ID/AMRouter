@@ -149,7 +149,7 @@ export default function MediaProviderKindPage() {
     if (kind === "webSearch" || kind === "webFetch") {
       navigate("/dashboard/media-providers/web");
     }
-  }, [kind, router]);
+  }, [kind, navigate]);
 
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
   const isEmbedding = kind === "embedding";
