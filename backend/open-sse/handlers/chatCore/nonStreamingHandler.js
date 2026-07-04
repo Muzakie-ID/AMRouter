@@ -195,10 +195,77 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   // Strip reasoning_content — some clients (e.g. Firecrawl AI SDK) have JSON parsers that
   // break on this non-standard field, even though OpenAI allows it in extensions.
-  if (translatedResponse?.choices) {
+  if (translatedResponse?.choices && sourceFormat !== FORMATS.CLAUDE) {
     for (const choice of translatedResponse.choices) {
       if (choice?.message) delete choice.message.reasoning_content;
     }
+  }
+
+  // If client sent Anthropic Messages format (/v1/messages), convert response back to
+  // Anthropic format. 9router always works in OpenAI format internally; this step
+  // is the reverse-translation for Claude Code / Anthropic SDK clients.
+  if (sourceFormat === FORMATS.CLAUDE) {
+    const choice = translatedResponse?.choices?.[0];
+    const msg = choice?.message || {};
+    const contentBlocks = [];
+    if (msg.reasoning_content) contentBlocks.push({ type: "thinking", thinking: msg.reasoning_content });
+    if (msg.content) contentBlocks.push({ type: "text", text: msg.content });
+    if (Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        let input = {};
+        try { input = JSON.parse(tc.function?.arguments || "{}"); } catch {}
+        contentBlocks.push({ type: "tool_use", id: tc.id, name: tc.function?.name, input });
+      }
+    }
+
+    let stopReason = "end_turn";
+    const fr = choice?.finish_reason;
+    if (fr === "tool_calls") stopReason = "tool_use";
+    else if (fr === "length") stopReason = "max_tokens";
+
+    const anthropicResponse = {
+      id: translatedResponse.id || `msg_${Date.now()}`,
+      type: "message",
+      role: "assistant",
+      content: contentBlocks.length ? contentBlocks : [{ type: "text", text: "" }],
+      model: translatedResponse.model || model,
+      stop_reason: stopReason,
+      stop_sequence: null,
+    };
+    if (translatedResponse.usage) {
+      anthropicResponse.usage = {
+        input_tokens: translatedResponse.usage.prompt_tokens || 0,
+        output_tokens: translatedResponse.usage.completion_tokens || 0,
+      };
+    } else {
+      anthropicResponse.usage = { input_tokens: 0, output_tokens: 0 };
+    }
+
+    reqLogger.logConvertedResponse(anthropicResponse);
+    const totalLatency = Date.now() - requestStartTime;
+    saveRequestDetail(buildRequestDetail({
+      provider, model, connectionId,
+      latency: { ttft: totalLatency, total: totalLatency },
+      tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
+      request: extractRequestConfig(body, stream),
+      providerRequest: finalBody || translatedBody || null,
+      providerResponse: responseBody || null,
+      response: {
+        content: msg.content || null,
+        thinking: msg.reasoning_content || null,
+        finish_reason: choice?.finish_reason || "unknown"
+      },
+      status: "success"
+    }, { endpoint: clientRawRequest?.endpoint || null })).catch(err => {
+      console.error("[RequestDetail] Failed to save:", err.message);
+    });
+
+    return {
+      success: true,
+      response: new Response(JSON.stringify(anthropicResponse), {
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+      })
+    };
   }
 
   reqLogger.logConvertedResponse(translatedResponse);

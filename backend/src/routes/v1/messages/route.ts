@@ -31,6 +31,12 @@ export async function OPTIONS() {
  */
 export async function POST_handler(req, res) {
   await ensureInitialized();
-  return await handleChat(request);
+  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+  const webReq = new Request(fullUrl, {
+    method: req.method,
+    headers: new Headers(req.headers),
+    body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined
+  });
+  return await handleChat(webReq);
 }
 
