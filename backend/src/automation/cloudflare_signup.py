@@ -1572,7 +1572,8 @@ def main():
 
         # ── EARLY GAK ATTEMPT: Try Global API Key first if ammail available ─────
         workers_ai_token = None
-        if ammail_ok and not workers_ai_token:
+        token_from_route = []  # always init — used later regardless of GAK success
+        if ammail_ok:
             log_step("Mencoba GAK dulu (skip UI form yang sering gagal)...")
             try:
                 workers_ai_token = create_token_via_global_key(page)
@@ -1581,12 +1582,11 @@ def main():
             except Exception as _egak_e:
                 log_step(f"Early GAK error: {_egak_e}")
 
-                # ── Strategy B: Browser UI — /profile/api-tokens/create (dropdown form)
+        # ── Strategy B: Browser UI — /profile/api-tokens/create (dropdown form)
         if not workers_ai_token:
             log_step("Trying browser UI token creation")
 
             # Setup route interception BEFORE navigating — capture CF's own token API call
-            token_from_route = []
             def _token_route_handler(route):
                 req = route.request
                 try:
@@ -1647,7 +1647,8 @@ def main():
 
         # ── Step 9: Skip Global API Key (needs OTP) — buat Account API Token langsung ──
         global_key = None
-        workers_ai_token = None
+        if not workers_ai_token:  # don't reset if GAK already succeeded!
+            workers_ai_token = None
 
         if not account_id:
             die("Tidak bisa membuat API Token: account_id tidak ditemukan")
@@ -2317,7 +2318,7 @@ def main():
                 body_text = page.inner_text("body")
                 import re as _re_tok
                 cfut_m = _re_tok.search(r'\b(cfut_[A-Za-z0-9_\-]{30,})\b', body_text)
-                if cfut_m:
+                if cfut_m and not workers_ai_token:
                     workers_ai_token = cfut_m.group(1)
                     log_step(f"Token dari body regex: {workers_ai_token[:12]}...")
             except Exception as _e:
