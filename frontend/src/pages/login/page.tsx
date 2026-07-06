@@ -17,8 +17,8 @@ const sampleTestimonials: Testimonial[] = [
   },
   {
     avatarSrc: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=60",
-    name: "David Martinez",
-    handle: "@davidcreates",
+    name: "Tutorial",
+    handle: "@tutorial",
     text: "Clean dashboard design, powerful model load balancer, and very intuitive settings management."
   },
 ];
