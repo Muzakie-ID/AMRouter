@@ -1815,84 +1815,107 @@ def main():
                 log_step(f"Account Resources React Select: {ar_opened}")
 
                 if "clicked" in ar_opened:
-                    time.sleep(1)
-                    # Type "all" to search for "All accounts" option
-                    # (React Select is search-driven; typing triggers option load)
-                    page.keyboard.type("all", delay=80)
-                    time.sleep(2)
+                    # Take screenshot to see dropdown state
+                    page.screenshot(path="/tmp/cf_ar_dropdown.png")
+                    time.sleep(2)  # Wait for async option load
 
-                    opts_text = page.evaluate("""
+                    # Step 1: Check options WITHOUT typing (initial load)
+                    opts_initial = page.evaluate("""
                         () => {
-                            const opts = Array.from(document.querySelectorAll('[class*="react-select__option"]'));
-                            return opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim());
+                            const opts = Array.from(document.querySelectorAll('[class*="react-select__option"], [class*="option"]'));
+                            const menu = document.querySelector('[class*="react-select__menu"]');
+                            const menuHtml = menu ? menu.innerHTML.substring(0, 300) : 'NO MENU';
+                            return {
+                                opts: opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim()),
+                                menuHtml: menuHtml
+                            };
                         }
                     """)
-                    log_step(f"Account Resources options after 'all' search: {opts_text}")
+                    log_step(f"AR initial options: {opts_initial.get('opts', [])} | menu: {opts_initial.get('menuHtml','')[:100]}")
 
-                    if opts_text:
+                    # Take screenshot to see what menu looks like
+                    page.screenshot(path="/tmp/cf_ar_menu.png")
+
+                    ar_selected = False
+                    if opts_initial.get('opts'):
                         first = page.locator("[class*='react-select__option']").first
                         if first.count() > 0 and first.is_visible(timeout=1000):
                             txt = first.text_content() or "?"
                             first.click()
                             time.sleep(0.5)
-                            log_step(f"Account Resources selected: {txt[:60]}")
-                    else:
-                        # Try clearing and typing account_id instead
+                            log_step(f"Account Resources selected (initial): {txt[:60]}")
+                            ar_selected = True
+
+                    # Step 2: If still empty, try typing "all"
+                    if not ar_selected:
+                        page.keyboard.type("all", delay=80)
+                        time.sleep(2)
+                        opts_all = page.evaluate("""() => {
+                            const opts = Array.from(document.querySelectorAll('[class*="react-select__option"]'));
+                            return opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim());
+                        }""")
+                        log_step(f"AR after 'all': {opts_all}")
+                        if opts_all:
+                            page.locator("[class*='react-select__option']").first.click()
+                            ar_selected = True
+                            log_step(f"AR selected after 'all': {opts_all[0][:50]}")
+
+                    # Step 3: Try account_id prefix
+                    if not ar_selected:
                         page.keyboard.press("Control+a")
-                        page.keyboard.press("Delete")
                         page.keyboard.type(account_id[:8], delay=80)
                         time.sleep(2)
-                        opts2 = page.evaluate("""
-                            () => {
-                                const opts = Array.from(document.querySelectorAll('[class*="react-select__option"]'));
-                                return opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim());
-                            }
-                        """)
-                        log_step(f"Account Resources options after account_id search: {opts2}")
-                        if opts2:
-                            first2 = page.locator("[class*='react-select__option']").first
-                            if first2.count() > 0 and first2.is_visible(timeout=1000):
-                                txt2 = first2.text_content() or "?"
-                                first2.click()
-                                time.sleep(0.5)
-                                log_step(f"Account Resources selected via account_id: {txt2[:60]}")
-                        else:
-                            page.keyboard.press("Escape")
-                            log_step(f"Account Resources: no options for 'all' or account_id — trying React inject")
+                        opts_id = page.evaluate("""() => {
+                            const opts = Array.from(document.querySelectorAll('[class*="react-select__option"]'));
+                            return opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim());
+                        }""")
+                        log_step(f"AR after acct_id: {opts_id}")
+                        if opts_id:
+                            page.locator("[class*='react-select__option']").first.click()
+                            ar_selected = True
+                            log_step(f"AR selected after acct_id: {opts_id[0][:50]}")
 
-                            # React fiber inject: walk up fiber tree to find onChange handler
-                            inject_result = page.evaluate(f"""
-                                () => {{
-                                    const ctrls = Array.from(document.querySelectorAll('[class*="react-select__control"]'));
-                                    const arCtrl = ctrls.find(c => {{
-                                        const ph = c.querySelector('[class*="react-select__placeholder"]');
-                                        return ph && ph.textContent.trim() === 'Select...';
-                                    }});
-                                    if (!arCtrl) return 'No Select... control';
-                                    const input = arCtrl.querySelector('input');
-                                    if (!input) return 'No input';
-                                    const fk = Object.keys(input).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
-                                    if (!fk) return 'No fiber';
-                                    let fiber = input[fk];
-                                    for (let i = 0; i < 25; i++) {{
-                                        if (!fiber || !fiber.return) break;
-                                        fiber = fiber.return;
-                                        const p = fiber.memoizedProps;
-                                        if (p && typeof p.onChange === 'function') {{
-                                            try {{
-                                                p.onChange(
-                                                    {{value: '{account_id}', label: 'My Account'}},
-                                                    {{action: 'select-option'}}
-                                                );
-                                                return 'React onChange called OK';
-                                            }} catch(e) {{ return 'onChange error: ' + e.message; }}
-                                        }}
-                                    }}
-                                    return 'onChange not found in fiber';
+                    if not ar_selected:
+                        page.keyboard.press("Escape")
+                        log_step(f"Account Resources: no options found — trying React inject")
+
+                        # React fiber inject: walk up fiber tree to find onChange handler
+                        inject_result = page.evaluate(f"""
+                            () => {{
+                                const ctrls = Array.from(document.querySelectorAll('[class*="react-select__control"]'));
+                                const arCtrl = ctrls.find(c => {{
+                                    const ph = c.querySelector('[class*="react-select__placeholder"]');
+                                    return ph && ph.textContent.trim() === 'Select...';
+                                }});
+                                if (!arCtrl) return 'No Select... control';
+                                const input = arCtrl.querySelector('input');
+                                if (!input) return 'No input';
+                                const fk = Object.keys(input).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance') || k.startsWith('__reactProps'));
+                                if (!fk) {{
+                                    const allKeys = Object.keys(input).filter(k=>k.startsWith('__')).join(',');
+                                    return 'No fiber. React keys: ' + allKeys;
                                 }}
-                            """)
-                            log_step(f"Account Resources React inject: {inject_result}")
-                            time.sleep(1)
+                                let fiber = input[fk];
+                                for (let i = 0; i < 25; i++) {{
+                                    if (!fiber || !fiber.return) break;
+                                    fiber = fiber.return;
+                                    const p = fiber.memoizedProps;
+                                    if (p && typeof p.onChange === 'function') {{
+                                        try {{
+                                            p.onChange(
+                                                {{value: '{account_id}', label: 'My Account'}},
+                                                {{action: 'select-option'}}
+                                            );
+                                            return 'React onChange called OK';
+                                        }} catch(e) {{ return 'onChange error: ' + e.message; }}
+                                    }}
+                                }}
+                                return 'onChange not found';
+                            }}
+                        """)
+                        log_step(f"Account Resources React inject: {inject_result}")
+                        time.sleep(1)
+
             except Exception as e:
                 log_step(f"Account Resources error: {e}")
 
