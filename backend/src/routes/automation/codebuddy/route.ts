@@ -770,8 +770,10 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
       }
 
       try {
+        const logDir = "/home/ahwanulm/.9router-v2/logs";
+        fs.mkdirSync(logDir, { recursive: true });
         fs.appendFileSync(
-          "/home/ahwanulm/.9router-v2/logs/automation_spawn.log",
+          `${logDir}/automation_spawn.log`,
           `[${new Date().toISOString()}] route.js spawning python: ${venvPython} ${args.join(" ")}\n`
         );
       } catch (err) {
