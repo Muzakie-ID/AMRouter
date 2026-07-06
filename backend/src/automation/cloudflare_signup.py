@@ -732,12 +732,21 @@ def main():
         time.sleep(3)
 
         # Check for errors (email already registered, etc.)
+        email_already_registered = False
         for err_sel in ["text=already registered", "text=already exists", "text=taken", ".error-message"]:
             try:
                 if page.locator(err_sel).first.is_visible(timeout=1000):
-                    die(f"Email sudah terdaftar atau error: {args.email}")
+                    log_step(f"Email sudah terdaftar ({args.email}) — skip signup, langsung login")
+                    email_already_registered = True
+                    break
             except Exception:
                 pass
+
+        if email_already_registered:
+            # Jump to login section — goto the login page
+            page.goto("https://dash.cloudflare.com/login", wait_until="domcontentloaded", timeout=30000)
+            time.sleep(2)
+
 
         # ── Step 6: Email verification ────────────────────────────────────────
         if ammail_ok:
