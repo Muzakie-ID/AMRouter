@@ -1265,13 +1265,38 @@ def main():
                                 otp_input.fill(otp_code)
                                 time.sleep(0.5)
                                 page.screenshot(path="/tmp/cf_otp_filled.png")
-                                # Click Verify/Confirm after filling OTP
-                                for btn_sel in ["button:has-text('Verify')", "button:has-text('Confirm')", "button:has-text('Submit')", "button:has-text('Continue')", "button[type='submit']"]:
+
+                                # Solve Turnstile inside the Global API Key modal (if present)
+                                log_step("Checking for Turnstile in GAK modal...")
+                                for _ts_attempt in range(8):
+                                    try:
+                                        cf_frames = [f for f in page.frames if 'challenges.cloudflare.com' in f.url]
+                                        for _f in cf_frames:
+                                            try:
+                                                cb = _f.locator("input[type='checkbox']")
+                                                if cb.count() > 0 and cb.is_visible(timeout=1000):
+                                                    cb.click()
+                                                    time.sleep(2)
+                                                    log_step("GAK modal Turnstile clicked")
+                                                    break
+                                            except Exception:
+                                                pass
+                                        # Check if turnstile is solved (response hidden input)
+                                        _ts_solved = page.evaluate("!!document.querySelector('[name=cf_challenge_response],[name=g-recaptcha-response]')?.value")
+                                        if _ts_solved:
+                                            log_step("GAK Turnstile solved")
+                                            break
+                                    except Exception:
+                                        pass
+                                    time.sleep(1)
+
+                                # Click Verify/View button after OTP + Turnstile
+                                for btn_sel in ["button:has-text('View')", "button:has-text('Verify')", "button:has-text('Confirm')", "button:has-text('Submit')", "button[type='submit']"]:
                                     try:
                                         b = page.locator(btn_sel).first
                                         if b.count() > 0 and b.is_visible(timeout=2000):
                                             b.click()
-                                            time.sleep(3)
+                                            time.sleep(5)
                                             log_step(f"OTP submitted via: {btn_sel}")
                                             break
                                     except Exception:
