@@ -1220,112 +1220,209 @@ def main():
         # ── Step 10: Create Workers AI Token — proper CF UI flow ──────────────
         log_step("Membuat Workers AI API Token via browser...")
         try:
+            # Helper: dismiss any OneTrust / GDPR cookie consent dialogs
+            def dismiss_consent_dialogs(page):
+                """Dismiss OneTrust, cookie consent, GDPR popups that block the page."""
+                for sel in [
+                    "button#onetrust-accept-btn-handler",
+                    "button:has-text('Accept all')",
+                    "button:has-text('Accept All')",
+                    "button:has-text('I Accept')",
+                    "button:has-text('Accept')",
+                    "button:has-text('Agree')",
+                    "[id*='accept'][id*='cookie']",
+                    ".ot-sdk-btn-floating",
+                ]:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0 and el.is_visible(timeout=1000):
+                            el.click()
+                            log_step(f"Dismissed consent via: {sel}")
+                            time.sleep(0.5)
+                            break
+                    except Exception:
+                        continue
+
             # 1. Navigate to profile/api-tokens (not account-specific)
             page.goto("https://dash.cloudflare.com/profile/api-tokens", wait_until="domcontentloaded", timeout=25000)
             wait_for_cf_clearance(page, timeout=15)
             time.sleep(3)
+            dismiss_consent_dialogs(page)
             log_step(f"API Tokens page: {page.url}")
             page.screenshot(path="/tmp/cf_tokens_page.png")
 
-            # 2. Click "+ Create Token" button
-            for sel in ["button:has-text('Create Token')", "a:has-text('Create Token')", "[href*='create']"]:
+            # 2. Click "Create Token" button → wait for template page to render
+            for btn_sel in ["button:has-text('Create Token')", "a:has-text('Create Token')"]:
                 try:
-                    b = page.locator(sel).first
+                    b = page.locator(btn_sel).first
                     if b.count() > 0 and b.is_visible(timeout=3000):
                         b.click()
-                        time.sleep(2)
-                        log_step(f"Clicked Create Token via: {sel}")
+                        log_step(f"Clicked Create Token via: {btn_sel}")
                         break
                 except Exception:
                     continue
 
-            time.sleep(2)
+            # Wait for template page content (React routing — URL stays same)
+            try:
+                page.wait_for_selector(
+                    "button:has-text('Use template'), text=Workers AI, text=Create Custom Token",
+                    timeout=8000
+                )
+                time.sleep(1)
+            except Exception:
+                time.sleep(3)
+            dismiss_consent_dialogs(page)
             page.screenshot(path="/tmp/cf_create_token_page.png")
             log_step(f"After Create Token click: {page.url}")
 
-            # 3. Click "Get started" for Custom Token
-            for sel in ["button:has-text('Get started')", "a:has-text('Get started')"]:
-                try:
-                    b = page.locator(sel).first
-                    if b.count() > 0 and b.is_visible(timeout=3000):
-                        b.click()
-                        time.sleep(2)
-                        log_step(f"Clicked Get started via: {sel}")
-                        break
-                except Exception:
-                    continue
+            # STRATEGY: Use "Workers AI" template directly — much more reliable than custom token form
+            # The template page has a "Workers AI" row with "Use template" button
+            workers_ai_template_used = False
 
-            time.sleep(2)
-            page.screenshot(path="/tmp/cf_custom_token_form.png")
-            log_step(f"Custom token form: {page.url}")
-
-            # 4. Fill Token name
-            name_input = page.locator("input").first
-            for name_sel in ["input[placeholder*='name' i]", "input[name*='name' i]", "input[aria-label*='name' i]", "input:first-of-type"]:
-                try:
-                    el = page.locator(name_sel).first
-                    if el.count() > 0 and el.is_visible(timeout=2000):
-                        el.click()
-                        el.fill("9router-workers-ai")
-                        time.sleep(0.5)
-                        log_step("Token name filled: 9router-workers-ai")
-                        break
-                except Exception:
-                    continue
-
-            # 5. Select Workers AI permission from dropdown
-            # The form has 3 dropdowns in Permissions row: [Account] [Select/search] [Select...]
-            # Wait for React form to fully hydrate before searching
+            # Wait explicitly for template page to fully hydrate
             try:
-                page.wait_for_selector(
-                    "input[aria-autocomplete], [role='combobox'], input[placeholder*='Select' i]",
-                    timeout=10000
-                )
-                time.sleep(1)
-                log_step("React form loaded, searching dropdowns")
+                page.wait_for_selector("button:has-text('Use template')", timeout=8000)
+                time.sleep(0.5)
+                log_step("Template page ready")
+            except Exception:
+                log_step("Template page wait timeout, trying anyway")
+
+            try:
+                # Find the "Workers AI" template row and click its "Use template" button
+                # Structure: <tr> or <div> containing "Workers AI" text + "Use template" button
+                wa_row = page.locator("tr:has-text('Workers AI'), li:has-text('Workers AI'), [class*='row']:has-text('Workers AI')").first
+                if wa_row.count() > 0 and wa_row.is_visible(timeout=3000):
+                    use_btn = wa_row.locator("button:has-text('Use template'), a:has-text('Use template')")
+                    if use_btn.count() > 0 and use_btn.is_visible(timeout=2000):
+                        use_btn.click()
+                        time.sleep(3)
+                        log_step("Workers AI template clicked via row")
+                        workers_ai_template_used = True
             except Exception as e:
-                log_step(f"Wait for form timeout: {e}, continuing anyway")
-                time.sleep(2)
+                log_step(f"Template row approach: {e}")
 
-            workers_ai_permission_set = False
+            # Fallback: find "Use template" button next to "Workers AI" text using JS
+            if not workers_ai_template_used:
+                try:
+                    # Get all "Use template" buttons and find the one near "Workers AI" text
+                    use_btns = page.locator("button:has-text('Use template')").all()
+                    log_step(f"Found {len(use_btns)} Use template buttons")
+                    # Workers AI is typically the 5th template (index 4)
+                    # Find by evaluating each button's nearby text
+                    result = page.evaluate("""
+                        () => {
+                            const btns = Array.from(document.querySelectorAll('button'));
+                            const useTemplateBtns = btns.filter(b => b.textContent.trim() === 'Use template');
+                            for (const btn of useTemplateBtns) {
+                                // Check if the parent row/section contains "Workers AI"
+                                let el = btn.parentElement;
+                                for (let i = 0; i < 5; i++) {
+                                    if (el && el.textContent.includes('Workers AI') && !el.textContent.includes('Cloudflare Workers')) {
+                                        btn.click();
+                                        return 'clicked Workers AI template: ' + el.textContent.substring(0, 50);
+                                    }
+                                    el = el ? el.parentElement : null;
+                                }
+                            }
+                            return 'Workers AI template button not found';
+                        }
+                    """)
+                    log_step(f"JS template click: {result}")
+                    if "clicked" in result:
+                        workers_ai_template_used = True
+                        time.sleep(3)
+                except Exception as e:
+                    log_step(f"JS template fallback: {e}")
 
-            # Strategy A: click the second select in the permissions row
-            try:
-                # Find all select-like elements (combobox/select)
-                perm_dropdowns = page.locator("select, [role='combobox'], [role='listbox']").all()
-                log_step(f"Found {len(perm_dropdowns)} dropdowns")
+            if workers_ai_template_used:
+                # Workers AI template pre-fills the form — just rename the token and submit
+                log_step(f"Template form URL: {page.url}")
+                page.screenshot(path="/tmp/cf_template_form.png")
 
-                # The second dropdown in the permissions row is for permission type
-                # Try typing in a searchable dropdown
-                for sel in [
-                    "[class*='select'] input",
-                    "input[role='combobox']",
-                    "input[aria-autocomplete]",
-                    "[aria-label*='permission' i] input",
-                    "[placeholder*='Select' i]",
-                ]:
+                # Rename token from default to "9router-workers-ai"
+                try:
+                    for name_sel in ["input[name*='name' i]", "input[placeholder*='name' i]", "input[type='text']:first-of-type"]:
+                        try:
+                            el = page.locator(name_sel).first
+                            if el.count() > 0 and el.is_visible(timeout=2000):
+                                el.triple_click()
+                                el.fill("9router-workers-ai")
+                                log_step("Token name renamed: 9router-workers-ai")
+                                break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    log_step(f"Rename token: {e}")
+
+                workers_ai_permission_set = True  # template already has Workers AI + Read
+            else:
+                # Fallback to custom token form
+                log_step("Template not found, trying custom token form")
+                # 3. Click "Get started" for Custom Token
+                for sel in ["button:has-text('Get started')", "a:has-text('Get started')"]:
                     try:
-                        els = page.locator(sel).all()
-                        for el in els:
-                            if el.is_visible():
-                                el.click()
-                                time.sleep(0.5)
-                                el.fill("Workers AI")
-                                time.sleep(1)
-                                # Click on "Workers AI" option in dropdown
-                                wa_opt = page.locator("text=Workers AI").first
-                                if wa_opt.count() > 0 and wa_opt.is_visible(timeout=2000):
-                                    wa_opt.click()
-                                    time.sleep(0.5)
-                                    log_step(f"Workers AI selected via: {sel}")
-                                    workers_ai_permission_set = True
-                                    break
-                        if workers_ai_permission_set:
+                        b = page.locator(sel).first
+                        if b.count() > 0 and b.is_visible(timeout=3000):
+                            b.click()
+                            time.sleep(2)
+                            log_step(f"Clicked Get started via: {sel}")
                             break
                     except Exception:
                         continue
-            except Exception as e:
-                log_step(f"Dropdown strategy A: {e}")
+
+                time.sleep(2)
+                page.screenshot(path="/tmp/cf_custom_token_form.png")
+
+                # 4. Fill Token name
+                for name_sel in ["input[placeholder*='name' i]", "input[name*='name' i]", "input[aria-label*='name' i]", "input:first-of-type"]:
+                    try:
+                        el = page.locator(name_sel).first
+                        if el.count() > 0 and el.is_visible(timeout=2000):
+                            el.click()
+                            el.fill("9router-workers-ai")
+                            time.sleep(0.5)
+                            log_step("Token name filled: 9router-workers-ai")
+                            break
+                    except Exception:
+                        continue
+
+                # 5. Select Workers AI permission
+                try:
+                    page.wait_for_selector("input[aria-autocomplete]", timeout=8000)
+                    time.sleep(1)
+                    log_step("React form loaded, searching dropdowns")
+                except Exception as e:
+                    log_step(f"Wait for form timeout: {e}")
+                    time.sleep(2)
+
+                workers_ai_permission_set = False
+
+                # Find all select-like elements
+                try:
+                    perm_dropdowns = page.locator("select, [role='combobox'], [role='listbox']").all()
+                    log_step(f"Found {len(perm_dropdowns)} dropdowns")
+                    for sel in ["input[aria-autocomplete]", "[class*='select'] input", "[placeholder*='Select' i]"]:
+                        try:
+                            els = page.locator(sel).all()
+                            for el in els:
+                                if el.is_visible():
+                                    el.click()
+                                    time.sleep(0.5)
+                                    el.fill("Workers AI")
+                                    time.sleep(1)
+                                    wa_opt = page.locator("text=Workers AI").first
+                                    if wa_opt.count() > 0 and wa_opt.is_visible(timeout=2000):
+                                        wa_opt.click()
+                                        time.sleep(0.5)
+                                        log_step(f"Workers AI selected via: {sel}")
+                                        workers_ai_permission_set = True
+                                        break
+                            if workers_ai_permission_set:
+                                break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    log_step(f"Workers AI dropdown: {e}")
 
             # Strategy B: use keyboard Tab to navigate to permission select, type Workers AI
             if not workers_ai_permission_set:
@@ -1378,102 +1475,104 @@ def main():
             log_step(f"After permission selection (set={workers_ai_permission_set})")
             time.sleep(1)
 
-            # 5b. Select "Edit" from the third dropdown (React custom dropdown)
-            # From screenshot: row is [Account ▼][Workers AI ▼][Select... ▼]
-            # Need to click the 3rd dropdown (Select...) which is the permission level
-            read_set = False
-            time.sleep(0.5)
+            # 5b. Select "Edit" — ONLY for custom form, NOT template
+            # Template already has Workers AI:Read; adding again = duplicate permission = validation fail
+            read_set = workers_ai_template_used  # template = already done
+            if workers_ai_template_used:
+                log_step("Template used — skip Read/Edit dropdown (Workers AI:Read already set)")
+            else:
+                time.sleep(0.5)
 
-            # Strategy A: JS — find all React-Select containers, click the one showing "Select..."
-            try:
-                result = page.evaluate("""
-                    () => {
-                        // Find all elements with placeholder "Select..."
-                        const all = Array.from(document.querySelectorAll('*'));
-                        for (const el of all) {
-                            if (el.children.length === 0 && el.textContent.trim() === 'Select...') {
-                                el.click();
-                                return 'clicked placeholder: ' + el.tagName + ' ' + el.className;
+                # Strategy A: JS — find all React-Select containers, click the one showing "Select..."
+                try:
+                    result = page.evaluate("""
+                        () => {
+                            // Find all elements with placeholder "Select..."
+                            const all = Array.from(document.querySelectorAll('*'));
+                            for (const el of all) {
+                                if (el.children.length === 0 && el.textContent.trim() === 'Select...') {
+                                    el.click();
+                                    return 'clicked placeholder: ' + el.tagName + ' ' + el.className;
+                                }
                             }
+                            return 'placeholder not found';
                         }
-                        return 'placeholder not found';
-                    }
-                """)
-                log_step(f"JS click Select...: {result}")
-                time.sleep(1)
-                # Now look for Edit or Read option in dropdown
-                for perm_label in ["Edit", "Read"]:
-                    for read_sel in [f"text='{perm_label}'", f"[role='option']:has-text('{perm_label}')", f"li:has-text('{perm_label}')"]:
-                        try:
-                            r = page.locator(read_sel).first
-                            if r.count() > 0 and r.is_visible(timeout=1500):
-                                r.click()
-                                time.sleep(0.5)
-                                log_step(f"{perm_label} selected via: {read_sel}")
-                                read_set = True
-                                break
-                        except Exception:
-                            continue
-                    if read_set:
-                        break
-            except Exception as e:
-                log_step(f"Strategy A JS click: {e}")
-
-            # Strategy B: bounding box — the Select... is to the right of Workers AI row
-            if not read_set:
-                try:
-                    # Find the Workers AI input in the permissions row
-                    wa_inputs = page.locator("input[aria-autocomplete]").all()
-                    for wa_inp in wa_inputs:
-                        try:
-                            if "Workers AI" in (wa_inp.input_value() or ""):
-                                wa_box = wa_inp.bounding_box()
-                                if wa_box:
-                                    # The Select... dropdown is to the right
-                                    select_x = wa_box["x"] + wa_box["width"] + 200
-                                    select_y = wa_box["y"] + wa_box["height"] / 2
-                                    page.mouse.click(select_x, select_y)
-                                    time.sleep(1)
-                                    log_step(f"Positional click Select... at ({select_x:.0f},{select_y:.0f})")
-                                    page.screenshot(path="/tmp/cf_after_select_click.png")
-                                    for perm_label in ["Edit", "Read"]:
-                                        for read_sel in [f"text='{perm_label}'", f"[role='option']:has-text('{perm_label}')"]:
-                                            try:
-                                                r = page.locator(read_sel).first
-                                                if r.count() > 0 and r.is_visible(timeout=1500):
-                                                    r.click()
-                                                    time.sleep(0.5)
-                                                    log_step(f"{perm_label} selected (positional)")
-                                                    read_set = True
-                                                    break
-                                            except Exception:
-                                                continue
-                                        if read_set:
-                                            break
+                    """)
+                    log_step(f"JS click Select...: {result}")
+                    time.sleep(1)
+                    # Now look for Edit or Read option in dropdown
+                    for perm_label in ["Edit", "Read"]:
+                        for read_sel in [f"text='{perm_label}'", f"[role='option']:has-text('{perm_label}')", f"li:has-text('{perm_label}')"]:
+                            try:
+                                r = page.locator(read_sel).first
+                                if r.count() > 0 and r.is_visible(timeout=1500):
+                                    r.click()
+                                    time.sleep(0.5)
+                                    log_step(f"{perm_label} selected via: {read_sel}")
+                                    read_set = True
                                     break
-                        except Exception:
-                            continue
+                            except Exception:
+                                continue
+                        if read_set:
+                            break
                 except Exception as e:
-                    log_step(f"Strategy B positional: {e}")
+                    log_step(f"Strategy A JS click: {e}")
 
-            # Strategy C: keyboard Tab navigation
-            if not read_set:
-                try:
-                    page.keyboard.press("Tab")
-                    time.sleep(0.5)
-                    page.keyboard.press("Tab")
-                    time.sleep(0.5)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.8)
-                    # Try arrow down to navigate options
-                    page.keyboard.press("ArrowDown")
-                    time.sleep(0.3)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.5)
-                    log_step("Read/Edit via Tab+Enter keyboard")
-                    read_set = True
-                except Exception as e:
-                    log_step(f"Strategy C keyboard: {e}")
+                # Strategy B: bounding box — the Select... is to the right of Workers AI row
+                if not read_set:
+                    try:
+                        # Find the Workers AI input in the permissions row
+                        wa_inputs = page.locator("input[aria-autocomplete]").all()
+                        for wa_inp in wa_inputs:
+                            try:
+                                if "Workers AI" in (wa_inp.input_value() or ""):
+                                    wa_box = wa_inp.bounding_box()
+                                    if wa_box:
+                                        # The Select... dropdown is to the right
+                                        select_x = wa_box["x"] + wa_box["width"] + 200
+                                        select_y = wa_box["y"] + wa_box["height"] / 2
+                                        page.mouse.click(select_x, select_y)
+                                        time.sleep(1)
+                                        log_step(f"Positional click Select... at ({select_x:.0f},{select_y:.0f})")
+                                        page.screenshot(path="/tmp/cf_after_select_click.png")
+                                        for perm_label in ["Edit", "Read"]:
+                                            for read_sel in [f"text='{perm_label}'", f"[role='option']:has-text('{perm_label}')"]:
+                                                try:
+                                                    r = page.locator(read_sel).first
+                                                    if r.count() > 0 and r.is_visible(timeout=1500):
+                                                        r.click()
+                                                        time.sleep(0.5)
+                                                        log_step(f"{perm_label} selected (positional)")
+                                                        read_set = True
+                                                        break
+                                                except Exception:
+                                                    continue
+                                            if read_set:
+                                                break
+                                        break
+                            except Exception:
+                                continue
+                    except Exception as e:
+                        log_step(f"Strategy B positional: {e}")
+
+                # Strategy C: keyboard Tab navigation
+                if not read_set:
+                    try:
+                        page.keyboard.press("Tab")
+                        time.sleep(0.5)
+                        page.keyboard.press("Tab")
+                        time.sleep(0.5)
+                        page.keyboard.press("Enter")
+                        time.sleep(0.8)
+                        # Try arrow down to navigate options
+                        page.keyboard.press("ArrowDown")
+                        time.sleep(0.3)
+                        page.keyboard.press("Enter")
+                        time.sleep(0.5)
+                        log_step("Read/Edit via Tab+Enter keyboard")
+                        read_set = True
+                    except Exception as e:
+                        log_step(f"Strategy C keyboard: {e}")
 
             log_step(f"Read access level set: {read_set}")
             page.screenshot(path="/tmp/cf_after_read_select.png")
