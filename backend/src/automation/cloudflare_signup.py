@@ -581,6 +581,7 @@ def main():
     )
     if proxy_dict:
         launch_kwargs["proxy"] = proxy_dict
+        launch_kwargs["geoip"] = True  # match geolocation to proxy IP (suppresses LeakWarning)
 
     try:
         browser_ctx = Camoufox(**launch_kwargs)
