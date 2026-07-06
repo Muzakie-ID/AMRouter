@@ -1276,47 +1276,32 @@ def main():
                                 page.screenshot(path="/tmp/cf_gak_before_ts.png")
                                 _ts_clicked = False
 
-                                # Inspect Turnstile frame content
-                                ts_frame_obj = next((f for f in page.frames if 'challenges.cloudflare.com' in (f.url or '')), None)
-                                if ts_frame_obj:
-                                    try:
-                                        _fhtml = ts_frame_obj.evaluate("document.body ? document.body.innerHTML.slice(0,500) : 'NO BODY'")
-                                        log_step(f"GAK TS frame HTML: {_fhtml}")
-                                        # Try shadow DOM click via evaluate
-                                        _shadow_clicked = ts_frame_obj.evaluate("""
-                                            () => {
-                                                const tryClick = (el) => {
-                                                    if (!el) return false;
-                                                    const inp = el.querySelector('input[type=checkbox]') || el.querySelector('input') || el.querySelector('label');
-                                                    if (inp) { inp.click(); return true; }
-                                                    for (const ch of el.children) {
-                                                        const sr = ch.shadowRoot;
-                                                        if (sr) {
-                                                            const inp2 = sr.querySelector('input[type=checkbox]') || sr.querySelector('input') || sr.querySelector('label');
-                                                            if (inp2) { inp2.click(); return true; }
-                                                        }
-                                                    }
-                                                    return false;
-                                                };
-                                                return tryClick(document.body);
-                                            }
-                                        """)
-                                        log_step(f"GAK TS shadow click: {_shadow_clicked}")
-                                        if _shadow_clicked:
-                                            time.sleep(10)
-                                            _ts_clicked = True
-                                    except Exception as _fe:
-                                        log_step(f"GAK TS frame eval: {str(_fe)[:80]}")
+                                # Use existing try_click_turnstile_checkbox() — it uses frame_element().bounding_box()
+                                log_step("GAK TS: calling try_click_turnstile_checkbox...")
+                                _ts_clicked = try_click_turnstile_checkbox(page)
+                                log_step(f"GAK TS click result: {_ts_clicked}")
+                                if _ts_clicked:
+                                    time.sleep(10)  # wait for Camoufox to auto-solve
 
-                                # Method 2: Mouse click at Turnstile checkbox position
+                                # Fallback: direct frame_element bounding box
                                 if not _ts_clicked:
                                     try:
-                                        page.mouse.click(547, 432)
-                                        time.sleep(10)
-                                        log_step("GAK TS mouse.click at (547,432)")
-                                        _ts_clicked = True
+                                        _ts_f = next((f for f in page.frames if 'challenges.cloudflare.com' in (f.url or '')), None)
+                                        if _ts_f:
+                                            _handle = _ts_f.frame_element()
+                                            _bb = _handle.bounding_box() if _handle else None
+                                            log_step(f"GAK TS frame_element bbox: {_bb}")
+                                            if _bb:
+                                                _tx = _bb["x"] + 28
+                                                _ty = _bb["y"] + 32
+                                                page.mouse.move(_tx, _ty, steps=10)
+                                                time.sleep(0.3)
+                                                page.mouse.click(_tx, _ty)
+                                                time.sleep(10)
+                                                log_step(f"GAK TS bbox click: ({_tx:.0f},{_ty:.0f})")
+                                                _ts_clicked = True
                                     except Exception as _me:
-                                        log_step(f"GAK TS mouse err: {_me}")
+                                        log_step(f"GAK TS bbox err: {_me}")
 
                                 page.screenshot(path="/tmp/cf_gak_before_submit.png")
 
