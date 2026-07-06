@@ -1117,7 +1117,7 @@ def main():
                             time.sleep(5)
                             try:
                                 msgs_resp = ammail_request(_ammail_base_url, _ammail_api_key,
-                                                      f"/inboxes/{urllib.parse.quote(email.split('@')[0])}/messages")
+                                                      f"/inboxes/{urllib.parse.quote(args.email.split('@')[0])}/messages")
                                 # ammail_request returns dict {"messages": [...]} not a list directly
                                 msgs_list = msgs_resp.get("messages", []) if isinstance(msgs_resp, dict) else (msgs_resp if isinstance(msgs_resp, list) else [])
                                 for msg in msgs_list:
@@ -1158,7 +1158,7 @@ def main():
                 try:
                     pwd_input = page.locator("input[type='password']").first
                     if pwd_input.is_visible(timeout=3000):
-                        pwd_input.fill(password)
+                        pwd_input.fill(args.password)
                         time.sleep(0.5)
                         for btn_sel in ["button:has-text('Continue')", "button[type='submit']", "button:has-text('View')"]:
                             try:
@@ -1203,7 +1203,7 @@ def main():
                     return None
 
                 # Use Global API Key to create Workers AI token via CF API
-                api_email_header = email  # email dari outer scope
+                api_email_header = args.email  # email dari outer scope
                 headers = {
                     "X-Auth-Email": api_email_header,
                     "X-Auth-Key": global_key,
