@@ -852,9 +852,32 @@ def main():
         except Exception:
             pass
 
-        # NOTE: removed the overly-aggressive fallback that treated "still on signup URL"
-        # as already-registered — this caused new accounts to skip email verification,
-        # resulting in unverified logins where CF blocks token creation.
+        # If signup not detected as success, wait longer — CF may still be processing
+        if not signup_success_verify and not email_already_registered:
+            log_step("Signup status unclear — waiting 10s for CF to redirect...")
+            for _sw in range(5):
+                time.sleep(2)
+                _cur_url = page.url
+                # Any URL change away from signup/login = success
+                if 'dash.cloudflare.com/login' not in _cur_url and 'dash.cloudflare.com' in _cur_url:
+                    log_step(f"CF redirect detected after signup: {_cur_url[:60]}")
+                    signup_success_verify = True
+                    break
+                # Also re-check body text
+                try:
+                    _recheck = page.evaluate("document.body.innerText").lower()
+                    if any(kw in _recheck for kw in ["check your email", "verify your email", "verification email"]):
+                        signup_success_verify = True
+                        log_step("Signup sukses terdeteksi (delayed)")
+                        break
+                    if any(kw in _recheck for kw in ["already registered", "already exists", "email exists"]):
+                        email_already_registered = True
+                        log_step("Email sudah terdaftar (delayed detect)")
+                        break
+                except Exception:
+                    pass
+            if not signup_success_verify and not email_already_registered:
+                log_step(f"Signup state masih unclear setelah wait. URL: {page.url[:80]}")
 
         if email_already_registered:
             # Navigate FRESH to /login (don't carry stale security_token from verify link)
@@ -876,6 +899,7 @@ def main():
                         log_step(f"Login goto error: {_ge}")
                         break
             time.sleep(3)
+
 
 
         # ── Step 6: Email verification ────────────────────────────────────────
