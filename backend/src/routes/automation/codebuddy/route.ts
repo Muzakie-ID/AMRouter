@@ -661,17 +661,19 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
       const isQoder = account.provider === "qoder";
       const isCloudflare = account.provider === "cloudflare";
 
-      // ── Cloudflare: API-based setup (no browser, no Python) ──────────
-      if (isCloudflare) {
-        const globalApiKey = (account.password || "").trim();
-        const email = (account.email || "").trim();
+      // ── Cloudflare: Smart routing ─────────────────────────────────────
+      // password == GAK (>=37 char or cfk_ prefix) → API-based, no browser
+      // password == login password (short) → fall-through to Python browser automation
+      const cfPassword = (account.password || "").trim();
+      const cfEmail = (account.email || "").trim();
+      const isGAK = cfPassword.length >= 37 || cfPassword.startsWith("cfk_");
+
+      if (isCloudflare && isGAK) {
+        const globalApiKey = cfPassword;
+        const email = cfEmail;
 
         if (!globalApiKey || !email) {
           return reject(new Error("Cloudflare account butuh email + Global API Key sebagai password."));
-        }
-
-        if (globalApiKey.length < 32) {
-          return reject(new Error("Global API Key tidak valid (terlalu pendek). Pastikan isi field password dengan Global API Key Cloudflare, bukan scoped token."));
         }
 
         try {
@@ -713,13 +715,11 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
           const accountId = cfAccount.id;
           const accountName = cfAccount.name;
 
-          // 2. Get permission groups
+          // 2. Get permission groups — exact match, exclude Metadata Read
           await updateCodeBuddyJobResult(jobId, idx, {
             email: account.email, status: "running", step: "Mengambil permission groups..."
           });
           const permGroups = await cfFetch(`/accounts/${accountId}/tokens/permission_groups`) as { id: string; name: string }[];
-          
-          // Exact match first, then fallback excluding Metadata Read
           const readGroup = permGroups.find((g) => g.name === "Workers AI Read" || g.name === "Workers AI Write") ||
             permGroups.find((g) =>
               g.name.toLowerCase().includes("workers ai") &&
@@ -731,7 +731,7 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
               g.name.toLowerCase().includes("workers ai") &&
               (g.name.toLowerCase().includes("write") || g.name.toLowerCase().includes("edit")) &&
               !g.name.toLowerCase().includes("metadata")
-            ) || readGroup;  // fallback: use read as both if no write found
+            ) || readGroup;
           const analyticsGroup = permGroups.find((g) =>
             g.name.toLowerCase().includes("account analytics") && g.name.toLowerCase().includes("read")
           );
@@ -743,7 +743,7 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
           await updateCodeBuddyJobResult(jobId, idx, {
             email: account.email, status: "running", step: "Membuat API Token Workers AI..."
           });
-          const permissionGroups: any[] = [{ id: readGroup.id }, { id: editGroup.id }];
+          const permissionGroups: any[] = [{ id: readGroup.id }, { id: editGroup!.id }];
           if (analyticsGroup) permissionGroups.push({ id: analyticsGroup.id });
 
           const tokenResult = await cfFetch("/user/tokens", {
@@ -809,7 +809,7 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
           return resolve();
         }
       }
-      // ── End Cloudflare API path ───────────────────────────────────────
+      // ── End CF GAK path. isCloudflare + short password → Python browser below ──
 
       if (isLeonardo && !settings.leonardo_invite_link) {
         return reject(new Error("Leonardo invite link belum di-set di Settings."));
