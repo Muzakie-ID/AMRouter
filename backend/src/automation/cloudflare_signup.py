@@ -915,9 +915,22 @@ def main():
                 try:
                     page.goto(verify_link, wait_until="domcontentloaded", timeout=30000)
                     wait_for_cf_clearance(page, timeout=20)
-                    time.sleep(3)
+                    # Wait for CF SPA to execute email verification API call
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        pass
+                    time.sleep(5)  # extra wait for React verification to complete
+                    _vurl = page.url
+                    _vbody = ""
+                    try:
+                        _vbody = page.evaluate("document.body.innerText").lower()[:200]
+                    except Exception:
+                        pass
+                    log_step(f"After verify link — URL: {_vurl[:80]}, body: {_vbody[:150]}")
                 except Exception as e:
                     log_step(f"Warning navigasi verify link: {e}")
+
             else:
                 log_step("Email verifikasi tidak diterima dalam 2 menit, lanjut coba login...")
         elif email_already_registered:
