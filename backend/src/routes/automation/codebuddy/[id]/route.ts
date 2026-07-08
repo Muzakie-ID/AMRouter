@@ -259,7 +259,7 @@ function executeCodeBuddySignupSingle(accountId, jobId, settings) {
       }
 
       try {
-        const logDir = path.join(process.env.DATA_DIR || path.join(os.homedir(), ".amrouter"), "logs");
+        const logDir = path.join(process.env.DATA_DIR || path.join(process.env.HOME || process.env.USERPROFILE || "/tmp", ".amrouter"), "logs");
         fs.mkdirSync(logDir, { recursive: true });
         fs.appendFileSync(
           `${logDir}/automation_spawn.log`,
