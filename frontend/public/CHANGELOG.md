@@ -4,6 +4,13 @@ All notable changes to the decoupled **9Router v2** platform will be documented 
 
 ---
 
+## [v0.6.1] - 2026-07-08
+
+### Fixed
+- **Icons not rendering (showing as text)**: Material Symbols Outlined font is now bundled locally via the `material-symbols` npm package instead of being loaded from Google Fonts CDN. Fixes icons appearing as raw text strings (e.g. `content_copy`, `vpn_key`, `bolt`) in environments without internet access or with blocked CDN requests.
+
+---
+
 ## [v0.6.0] - 2026-07-06
 
 ### Added

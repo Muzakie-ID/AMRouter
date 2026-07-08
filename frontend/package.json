@@ -20,6 +20,7 @@
     "@xyflow/react": "^12.11.1",
     "lucide-react": "^1.23.0",
     "marked": "^15.0.12",
+    "material-symbols": "^0.45.6",
     "prop-types": "^15.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
