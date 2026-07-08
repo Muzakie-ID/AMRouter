@@ -663,11 +663,15 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
 
       // ── Cloudflare: API-based setup (no browser, no Python) ──────────
       if (isCloudflare) {
-        const globalApiKey = account.password;
-        const email = account.email;
+        const globalApiKey = (account.password || "").trim();
+        const email = (account.email || "").trim();
 
         if (!globalApiKey || !email) {
           return reject(new Error("Cloudflare account butuh email + Global API Key sebagai password."));
+        }
+
+        if (globalApiKey.length < 32) {
+          return reject(new Error("Global API Key tidak valid (terlalu pendek). Pastikan isi field password dengan Global API Key Cloudflare, bukan scoped token."));
         }
 
         try {
@@ -714,16 +718,24 @@ function executeCodeBuddySignup(accountId, jobId, idx, settings) {
             email: account.email, status: "running", step: "Mengambil permission groups..."
           });
           const permGroups = await cfFetch(`/accounts/${accountId}/tokens/permission_groups`) as { id: string; name: string }[];
-          const readGroup = permGroups.find((g) =>
-            g.name.toLowerCase().includes("workers ai") && g.name.toLowerCase().includes("read")
-          );
-          const editGroup = permGroups.find((g) =>
-            g.name.toLowerCase().includes("workers ai") && g.name.toLowerCase().includes("edit")
-          );
+          
+          // Exact match first, then fallback excluding Metadata Read
+          const readGroup = permGroups.find((g) => g.name === "Workers AI Read" || g.name === "Workers AI Write") ||
+            permGroups.find((g) =>
+              g.name.toLowerCase().includes("workers ai") &&
+              g.name.toLowerCase().includes("read") &&
+              !g.name.toLowerCase().includes("metadata")
+            );
+          const editGroup = permGroups.find((g) => g.name === "Workers AI Write") ||
+            permGroups.find((g) =>
+              g.name.toLowerCase().includes("workers ai") &&
+              (g.name.toLowerCase().includes("write") || g.name.toLowerCase().includes("edit")) &&
+              !g.name.toLowerCase().includes("metadata")
+            ) || readGroup;  // fallback: use read as both if no write found
           const analyticsGroup = permGroups.find((g) =>
             g.name.toLowerCase().includes("account analytics") && g.name.toLowerCase().includes("read")
           );
-          if (!readGroup || !editGroup) {
+          if (!readGroup) {
             throw new Error(`Workers AI permission groups tidak ditemukan. Tersedia: ${permGroups.map(g => g.name).join(", ")}`);
           }
 
