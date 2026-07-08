@@ -123,7 +123,7 @@ export async function getUsageForProvider(connection, proxyOptions = null) {
     case "kimi-coding":
       return await getKimiCodingUsage(accessToken, proxyOptions);
     case "cloudflare-ai":
-      return await getCloudflareUsage(apiKey, providerSpecificData, proxyOptions);
+      return await getCloudflareUsage(connection, proxyOptions);
     case "cursor":
       return await getCursorUsage(accessToken, providerSpecificData, proxyOptions);
     case "kilocode":
@@ -1527,68 +1527,53 @@ async function getKimiCodingUsage(accessToken, proxyOptions = null) {
 
 // ─── Cloudflare Workers AI ────────────────────────────────────────────────────
 
-async function getCloudflareUsage(apiKey, providerSpecificData, proxyOptions = null) {
+async function getCloudflareUsage(connection, proxyOptions = null) {
   try {
+    const { apiKey, providerSpecificData, errorCode, backoffLevel, lastError, lastErrorAt } = connection;
     const accountId = providerSpecificData?.accountId;
     if (!accountId) {
       return { message: "Cloudflare: missing Account ID in provider settings." };
     }
 
-    // Try Cloudflare AI usage endpoint
-    const response = await proxyAwareFetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/usage`,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
+    // CF does not expose a REST/GraphQL usage endpoint accessible via scoped Worker AI tokens.
+    // Detect exhaustion from connection's stored error state (set by executor after 429).
+    const CF_DAILY_QUOTA = 10000; // neurons/day — free tier
+    const isExhausted = errorCode === 429 || errorCode === "429";
+
+    // Count modelLock keys to estimate usage (each lock = 1 full-day exhaustion on that model)
+    const modelLocks = Object.keys(connection).filter(k => k.startsWith("modelLock_"));
+    const lockedModels = modelLocks.length;
+
+    // Reset time: CF resets daily at midnight UTC
+    const now = new Date();
+    const resetAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+
+    // Build quota entry
+    // If exhausted: show used = total (0 remaining). If not: show 0 used (can't know actual).
+    const neuronsUsed = isExhausted ? CF_DAILY_QUOTA : 0;
+
+    return {
+      status: isExhausted ? "rate_limited" : "active",
+      accountId,
+      quotas: {
+        "Workers AI": {
+          used: neuronsUsed,
+          total: CF_DAILY_QUOTA,
+          resetAt,
+          unit: "neurons",
+          exhausted: isExhausted,
+          lockedModels,
         },
       },
-      proxyOptions
-    );
-
-    if (response.ok) {
-      const data = await response.json();
-      const result = data?.result || {};
-      return {
-        status: "active",
-        accountId,
-        usage: {
-          neurons: result?.neurons_used ?? result?.total_neurons,
-          requests: result?.total_requests,
-          periodStart: result?.period_start,
-          periodEnd: result?.period_end,
-        },
-        note: "Cloudflare Workers AI — free tier: 10,000 neurons/day.",
-      };
-    }
-
-    // Fallback: verify account exists
-    const verifyRes = await proxyAwareFetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-      },
-      proxyOptions
-    );
-
-    if (verifyRes.ok) {
-      const vData = await verifyRes.json();
-      return {
-        status: "active",
-        accountId,
-        accountName: vData?.result?.name,
-        note: "Cloudflare connected. Check Cloudflare Dashboard for detailed usage.",
-      };
-    }
-
-    return { message: "Cloudflare connected. Check Cloudflare Dashboard for usage." };
+      note: isExhausted
+        ? `Quota exhausted (10,000 neurons/day). Resets at midnight UTC. Last error: ${lastError?.slice?.(0, 80) || "429"}`
+        : "Cloudflare Workers AI — free tier: 10,000 neurons/day. Actual usage not available via API.",
+    };
   } catch (error) {
     return { message: `Cloudflare: ${error.message}` };
   }
 }
+
 
 // ─── Cursor ───────────────────────────────────────────────────────────────────
 
